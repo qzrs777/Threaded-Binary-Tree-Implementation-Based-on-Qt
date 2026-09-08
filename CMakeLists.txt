@@ -18,24 +18,19 @@ endif()
 
 option(BUILD_GUI "Build the Qt Widgets visualizer" ON)
 if(BUILD_GUI)
-    find_package(QT NAMES Qt6 Qt5 QUIET COMPONENTS Widgets LinguistTools)
+    find_package(QT NAMES Qt6 Qt5 QUIET COMPONENTS Widgets)
     if(QT_FOUND)
-        find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets LinguistTools)
-        set(CMAKE_AUTOUIC ON)
+        find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets)
         set(CMAKE_AUTOMOC ON)
         set(CMAKE_AUTORCC ON)
-        set(TS_FILES untitled1_zh_CN.ts)
         set(PROJECT_SOURCES
-            main.cpp mainwindow.cpp mainwindow.h mainwindow.ui
+            main.cpp mainwindow.cpp mainwindow.h
             treenodeitem.cpp treenodeitem.h treeedgeitem.cpp treeedgeitem.h
-            ${TS_FILES}
         )
         if(QT_VERSION_MAJOR GREATER_EQUAL 6)
             qt_add_executable(untitled1 MANUAL_FINALIZATION ${PROJECT_SOURCES})
-            qt_create_translation(QM_FILES ${CMAKE_SOURCE_DIR} ${TS_FILES})
         else()
             add_executable(untitled1 ${PROJECT_SOURCES})
-            qt5_create_translation(QM_FILES ${CMAKE_SOURCE_DIR} ${TS_FILES})
         endif()
         target_link_libraries(untitled1 PRIVATE threaded_tree_core Qt${QT_VERSION_MAJOR}::Widgets)
         if(QT_VERSION_MAJOR EQUAL 6)
@@ -45,4 +40,3 @@ if(BUILD_GUI)
         message(WARNING "Qt Widgets was not found; the GUI target will be skipped")
     endif()
 endif()
-

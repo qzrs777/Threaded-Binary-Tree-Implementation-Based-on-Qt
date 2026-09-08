@@ -1,37 +1,32 @@
 #ifndef TREENODEITEM_H
 #define TREENODEITEM_H
 
-#include <QObject>
+#include "threadedbinarytree.h"
+
 #include <QGraphicsEllipseItem>
-#include <QGraphicsTextItem>
-#include <QPen>
-enum Tag{LINK,THREAD};
+#include <QObject>
+
+class QGraphicsSceneMouseEvent;
+class QGraphicsTextItem;
+
 class TreeNodeItem : public QObject, public QGraphicsEllipseItem {
     Q_OBJECT
 
 public:
-    TreeNodeItem(int value, QGraphicsItem* parent = nullptr);
-    int getValue() const;
-    void setValue(int value);
-    Tag ltag;
-    Tag rtag;
-    TreeNodeItem* leftChild() const;
-    TreeNodeItem* rightChild() const;
-    void setLeftChild(TreeNodeItem* node);
-    void setRightChild(TreeNodeItem* node);
+    TreeNodeItem(NodeId id, int value, QGraphicsItem* parent = nullptr);
+
+    NodeId nodeId() const;
+    void setHighlighted(bool highlighted);
 
 signals:
-    void clicked(int value);
+    void clicked(NodeId id);
 
 protected:
     void mousePressEvent(QGraphicsSceneMouseEvent* event) override;
 
 private:
-    int value;
-    QGraphicsTextItem* textItem;
-    TreeNodeItem* left;
-    TreeNodeItem* right;
-
+    NodeId id_;
+    QGraphicsTextItem* textItem_;
 };
 
-#endif // TREENODEITEM_H
+#endif

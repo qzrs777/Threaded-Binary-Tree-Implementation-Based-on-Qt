@@ -1,339 +1,247 @@
-#include "MainWindow.h"
-#include "TreeEdgeItem.h"
-#include <QVBoxLayout>
+#include "mainwindow.h"
+
+#include "treeedgeitem.h"
+#include "treenodeitem.h"
+
+#include <QFrame>
+#include <QGraphicsScene>
+#include <QGraphicsView>
 #include <QHBoxLayout>
+#include <QLabel>
+#include <QLineEdit>
 #include <QMessageBox>
+#include <QPainter>
+#include <QPainterPath>
+#include <QPushButton>
+#include <QRadioButton>
+#include <QStringList>
+#include <QVBoxLayout>
+#include <QtMath>
 
-MainWindow::MainWindow(QWidget *parent)
-    : QMainWindow(parent), root(nullptr), selectedNode(nullptr) {
-    // 初始化场景和视图
-    scene = new QGraphicsScene(this);
-    view = new QGraphicsView(scene, this);
+namespace {
+constexpr qreal kHorizontalSpacing = 105.0;
+constexpr qreal kVerticalSpacing = 95.0;
+constexpr qreal kNodeRadius = 23.0;
 
+QPointF shortenedPoint(const QPointF& from, const QPointF& to, qreal distance) {
+    const QPointF delta = to - from;
+    const qreal length = qSqrt(delta.x() * delta.x() + delta.y() * delta.y());
+    if (length <= distance || qFuzzyIsNull(length)) return to;
+    return to - delta / length * distance;
+}
+} // namespace
 
-    view->setRenderHint(QPainter::Antialiasing);
+MainWindow::MainWindow(QWidget* parent)
+    : QMainWindow(parent),
+      scene_(new QGraphicsScene(this)),
+      view_(new QGraphicsView(scene_, this)),
+      nodeInput_(new QLineEdit(this)),
+      leftOption_(new QRadioButton(tr("左孩子"), this)),
+      rightOption_(new QRadioButton(tr("右孩子"), this)),
+      addButton_(new QPushButton(tr("添加节点"), this)),
+      deleteButton_(new QPushButton(tr("删除选中节点"), this)),
+      selectionLabel_(new QLabel(this)),
+      traversalLabel_(new QLabel(this)) {
+    setWindowTitle(tr("中序线索二叉树可视化"));
+    resize(1000, 700);
 
-    // 初始化输入框和按钮
-    nodeInput = new QLineEdit(this);
-     option1 = new QRadioButton("左", this);
-     option2 = new QRadioButton("右", this);
-    addButton = new QPushButton("添加节点", this);
-    deleteButton = new QPushButton("删除节点", this);
+    view_->setRenderHint(QPainter::Antialiasing);
+    view_->setDragMode(QGraphicsView::ScrollHandDrag);
+    view_->setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
+    nodeInput_->setPlaceholderText(tr("输入整数节点值"));
+    nodeInput_->setMaximumWidth(180);
+    leftOption_->setChecked(true);
 
-    // 布局
-    QHBoxLayout* inputLayout = new QHBoxLayout;
-    inputLayout->addWidget(nodeInput);
-    inputLayout->addWidget(option1);
-    inputLayout->addWidget(option2);
-    inputLayout->addWidget(addButton);
-    inputLayout->addWidget(deleteButton);
+    auto* controls = new QHBoxLayout;
+    controls->addWidget(new QLabel(tr("节点值："), this));
+    controls->addWidget(nodeInput_);
+    controls->addWidget(leftOption_);
+    controls->addWidget(rightOption_);
+    controls->addWidget(addButton_);
+    controls->addWidget(deleteButton_);
+    controls->addStretch();
 
-    QVBoxLayout* mainLayout = new QVBoxLayout;
-    mainLayout->addWidget(view);
-    mainLayout->addLayout(inputLayout);
+    auto* information = new QVBoxLayout;
+    information->addWidget(selectionLabel_);
+    information->addWidget(traversalLabel_);
+    auto* legend = new QLabel(tr("图例：实线 = 真实孩子　　红色虚线箭头 = 中序前驱/后继线索"), this);
+    legend->setStyleSheet("color:#475569;");
+    information->addWidget(legend);
 
-    QWidget* centralWidget = new QWidget(this);
+    auto* mainLayout = new QVBoxLayout;
+    mainLayout->addWidget(view_, 1);
+    mainLayout->addLayout(controls);
+    mainLayout->addLayout(information);
+
+    auto* centralWidget = new QWidget(this);
     centralWidget->setLayout(mainLayout);
     setCentralWidget(centralWidget);
 
-    // 连接信号槽
-    connect(addButton, &QPushButton::clicked, this, &MainWindow::onAddButtonClicked);
-    connect(deleteButton, &QPushButton::clicked, this, &MainWindow::onDeleteButtonClicked);
+    connect(addButton_, &QPushButton::clicked, this, &MainWindow::onAddButtonClicked);
+    connect(deleteButton_, &QPushButton::clicked, this, &MainWindow::onDeleteButtonClicked);
+    connect(nodeInput_, &QLineEdit::returnPressed, this, &MainWindow::onAddButtonClicked);
 
-    // 初始化根节点
-    root = new TreeNodeItem(1);
-    root->ltag=THREAD;
-    root->rtag=THREAD;
+    selectedNodeId_ = tree_.createRoot(1);
     drawTree();
 }
 
-MainWindow::~MainWindow() {}
+void MainWindow::assignDepths(const ThreadedNode* node,
+                              int depth,
+                              QHash<NodeId, int>& depths) const {
+    if (!node) return;
+    depths.insert(node->id, depth);
+    if (node->ltag == LinkTag::Child) assignDepths(node->left, depth + 1, depths);
+    if (node->rtag == LinkTag::Child) assignDepths(node->right, depth + 1, depths);
+}
 
 void MainWindow::drawTree() {
+    scene_->clear();
+    nodeItems_.clear();
 
-    QList<QGraphicsItem*> items = scene->items();
-    for (QGraphicsItem* item : items) {
-        if (TreeNodeItem* node = dynamic_cast<TreeNodeItem*>(item)) {
-            disconnect(node, &TreeNodeItem::clicked, this, &MainWindow::onNodeClicked);
+    if (selectedNodeId_ && !tree_.find(*selectedNodeId_)) selectedNodeId_.reset();
+    const auto ordered = tree_.inorderNodes();
+    if (ordered.empty()) {
+        scene_->addText(tr("树为空：输入整数后点击“添加节点”创建根节点"));
+        updateSelectionText();
+        updateTraversalText();
+        return;
+    }
+
+    QHash<NodeId, int> depths;
+    assignDepths(tree_.root(), 0, depths);
+    for (int i = 0; i < static_cast<int>(ordered.size()); ++i) {
+        const auto* node = ordered[static_cast<std::size_t>(i)];
+        auto* item = new TreeNodeItem(node->id, node->value);
+        item->setPos(60.0 + i * kHorizontalSpacing,
+                     60.0 + depths.value(node->id) * kVerticalSpacing);
+        item->setHighlighted(selectedNodeId_ && *selectedNodeId_ == node->id);
+        connect(item, &TreeNodeItem::clicked, this, &MainWindow::onNodeClicked);
+        nodeItems_.insert(node->id, item);
+    }
+
+    for (const auto* node : ordered) {
+        if (node->ltag == LinkTag::Child) drawEdge(node->id, node->left->id, false);
+        if (node->rtag == LinkTag::Child) drawEdge(node->id, node->right->id, false);
+    }
+    for (const auto* node : ordered) {
+        if (node->ltag == LinkTag::Thread && node->left) {
+            drawEdge(node->id, node->left->id, true, true);
+        }
+        if (node->rtag == LinkTag::Thread && node->right) {
+            drawEdge(node->id, node->right->id, true, false);
         }
     }
-    for (QGraphicsItem* item : items) {
-        if (dynamic_cast<TreeEdgeItem*>(item)) {
-            scene->removeItem(item);
-            delete item;
-        }
-    }
-    selectedNode=nullptr;
-    if (root) {
-        drawNode(root, 400, 50, 200);
-    }
+    for (auto* item : nodeItems_) scene_->addItem(item);
+
+    scene_->setSceneRect(scene_->itemsBoundingRect().adjusted(-55, -55, 55, 55));
+    view_->fitInView(scene_->sceneRect(), Qt::KeepAspectRatio);
+    updateSelectionText();
+    updateTraversalText();
 }
 
-void MainWindow::drawNode(TreeNodeItem* node, int x, int y, int offset) {
-    node->setPos(x, y);
-    scene->addItem(node);
-    connect(node, &TreeNodeItem::clicked, this, &MainWindow::onNodeClicked);
+void MainWindow::drawEdge(NodeId from, NodeId to, bool thread, bool predecessorThread) {
+    auto* fromItem = nodeItems_.value(from, nullptr);
+    auto* toItem = nodeItems_.value(to, nullptr);
+    if (!fromItem || !toItem) return;
 
-    // 绘制左子树
-    if (node->leftChild()&&node->ltag==LINK) {
-        drawNode(node->leftChild(), x - offset, y + 80, offset / 2);
-        drawEdge(node, node->leftChild());
-    }else if(node->leftChild()&&node->ltag==THREAD){
-        drawThreadEdge(node,node->leftChild());
-    }
-
-    // 绘制右子树
-    if (node->rightChild()&&node->rtag==LINK) {
-        drawNode(node->rightChild(), x + offset, y + 80, offset / 2);
-        drawEdge(node, node->rightChild());
-    }else if(node->rightChild()&&node->rtag==THREAD){
-        drawThreadEdge(node,node->rightChild());
-    }
-}
-
-void MainWindow::drawEdge(TreeNodeItem* from, TreeNodeItem* to) {
-    // 定义直线的起点和终点
-    QLineF line(from->pos().x(), from->pos().y(), to->pos().x(), to->pos().y());
-
-    // 创建边对象
-    TreeEdgeItem* edge = new TreeEdgeItem;
-    edge->setLine(line);
-
-    scene->addItem(edge);
-}
-void MainWindow::drawThreadEdge(TreeNodeItem* from, TreeNodeItem* to) {
-    QPointF start = from->pos();
-    QPointF end = to->pos();
-
-    // 创建路径
-    QPainterPath path;
-    path.moveTo(start);
-
-
-    QPointF ctrl((start.x() + end.x()) / 2, (start.y() + end.y()) / 2 - 50); // 控制点向上偏移
-    path.quadTo(ctrl, end); // 绘制弧线
-
-
-    TreeEdgeItem* edge = new TreeEdgeItem;
-    edge->setPath(path);
-
-    // 设置样式：红色虚线
-    QPen pen;
-    pen.setStyle(Qt::DashLine);
-    pen.setColor(Qt::red);
-    pen.setWidth(1);
-    edge->setPen(pen);
-
-    scene->addItem(edge);
-}
-void MainWindow::onAddButtonClicked() {
-    int value = nodeInput->text().toInt();
-    if (selectedNode) {
-        TreeNodeItem* newNode = new TreeNodeItem(value);
-        if(option1->isChecked()){
-        newNode->ltag=selectedNode->ltag;
-        newNode->setLeftChild(selectedNode->leftChild());
-        selectedNode->setLeftChild(newNode);
-        selectedNode->ltag=LINK;
-        newNode->rtag=THREAD;
-        newNode->setRightChild(selectedNode);
-        TreeNodeItem* prev=newNode;
-        if(prev->ltag==LINK){
-            prev=prev->leftChild();
-            while(prev->ltag==LINK){
-                prev=prev->rightChild();
-            }
-            prev->setRightChild(newNode);
-        }}else if(option2->isChecked()){
-            newNode->setRightChild(selectedNode->rightChild());
-            newNode->rtag=selectedNode->rtag;
-            selectedNode->setRightChild(newNode);
-            selectedNode->rtag=LINK;
-            newNode->ltag=THREAD;
-            newNode->setLeftChild(selectedNode);
-            TreeNodeItem* prev=newNode;
-            if(prev->rtag==LINK){
-                prev=prev->rightChild();
-                while(prev->ltag==LINK){
-                    prev=prev->leftChild();
-                }
-                prev->setLeftChild(newNode);
-            }
-        }else{QMessageBox::warning(this,"错误","请先选择一个插入方向");}
-        drawTree();
+    const QPointF fromCenter = fromItem->pos();
+    const QPointF toCenter = toItem->pos();
+    const QPointF start = shortenedPoint(toCenter, fromCenter, kNodeRadius);
+    const QPointF end = shortenedPoint(fromCenter, toCenter, kNodeRadius + (thread ? 6.0 : 0.0));
+    QPainterPath path(start);
+    if (thread) {
+        const QPointF middle = (start + end) / 2.0;
+        const qreal bend = predecessorThread ? 42.0 : -42.0;
+        path.quadTo(QPointF(middle.x(), middle.y() + bend), end);
     } else {
-        QMessageBox::warning(this, "错误", "请先选择一个节点！");
+        path.lineTo(end);
     }
+    scene_->addItem(new TreeEdgeItem(path, thread ? TreeEdgeKind::Thread : TreeEdgeKind::Child));
+}
+
+void MainWindow::onAddButtonClicked() {
+    bool ok = false;
+    const int value = nodeInput_->text().trimmed().toInt(&ok);
+    if (!ok) {
+        showInputError(tr("请输入有效的整数节点值。"));
+        return;
+    }
+
+    if (tree_.empty()) {
+        selectedNodeId_ = tree_.createRoot(value);
+        nodeInput_->clear();
+        drawTree();
+        return;
+    }
+    if (!selectedNodeId_) {
+        showInputError(tr("请先在图中选择父节点。"));
+        return;
+    }
+
+    std::optional<NodeId> inserted;
+    if (leftOption_->isChecked()) {
+        inserted = tree_.insertLeft(*selectedNodeId_, value);
+    } else if (rightOption_->isChecked()) {
+        inserted = tree_.insertRight(*selectedNodeId_, value);
+    } else {
+        showInputError(tr("请选择左孩子或右孩子。"));
+        return;
+    }
+    if (!inserted) {
+        showInputError(tr("该方向已经存在真实孩子，请选择其他位置。"));
+        return;
+    }
+
+    selectedNodeId_ = *inserted;
+    nodeInput_->clear();
+    drawTree();
 }
 
 void MainWindow::onDeleteButtonClicked() {
-    if (selectedNode) {
-        scene->removeItem(selectedNode);
-        TreeNodeItem* parent = findParent(root, selectedNode);
-        if(selectedNode==nullptr) {
-            return;
-        }
-        //没有子节点
-        if(selectedNode->ltag== THREAD&&selectedNode->rtag==THREAD) {
-            if (parent == nullptr) {
-                root = nullptr;
-            } else if (parent->leftChild() == selectedNode) {
-                parent->setLeftChild( selectedNode->leftChild());
-                parent->ltag = THREAD;
-            } else {
-                parent->setRightChild(selectedNode->rightChild());
-                parent->rtag = THREAD;
-            }
-        }
-        //一个子节点
-        else if (selectedNode->ltag == THREAD || selectedNode->rtag == THREAD) {
-            TreeNodeItem* child = (selectedNode->ltag == LINK) ? selectedNode->leftChild() : selectedNode->rightChild();
-
-            if (parent == nullptr) {
-                root = child;
-            } else if (parent->leftChild() == selectedNode) {
-                parent->setLeftChild(child);
-                if(selectedNode->leftChild()==child) {
-                    while (child->rtag==LINK) {
-                        child = child->rightChild();
-                    }
-                    child->setRightChild(selectedNode->rightChild());
-                }
-                else {
-                    while (child->ltag==LINK) {
-                        child = child->leftChild();
-                    }
-                    child->setLeftChild(selectedNode->leftChild());
-                }
-            } else {
-                parent->setRightChild( child);
-                if(selectedNode->leftChild()==child) {
-                    while (child->rtag==LINK) {
-                        child=child->rightChild();
-                    }
-                    child->setRightChild(selectedNode->rightChild());
-                }
-                else {
-                    while (child->ltag==LINK) {
-                        child=child->leftChild();
-                    }
-                    child->setLeftChild(selectedNode->leftChild());
-                }
-            }
-        }
-        //两个子节点
-        else {
-            TreeNodeItem *child=selectedNode->leftChild();
-            TreeNodeItem *pre=selectedNode;
-            while (child->rtag==LINK) {
-                pre = child;
-                child=child->rightChild();
-            }
-            if(child==selectedNode->leftChild()) {
-                if(child->ltag==LINK) {
-                    selectedNode->setLeftChild(child->leftChild());
-                }else if(child->ltag==THREAD) {
-                    selectedNode->setLeftChild(child->leftChild());
-                    selectedNode->ltag=THREAD;
-                }
-            }else if (child->ltag == LINK) {
-                pre->setRightChild(child->leftChild());
-            }else if(child->ltag == THREAD) {
-                pre->setRightChild(child->leftChild());
-                pre->rtag=THREAD;
-            }
-            if(parent==nullptr) {
-                root = child;
-                child->setLeftChild(selectedNode->leftChild());
-                child->ltag=selectedNode->ltag;
-                child->setRightChild(selectedNode->rightChild());
-                child->rtag=selectedNode->rtag;
-            }else if(parent->leftChild()==selectedNode) {
-                parent->setLeftChild(child);
-                child->setLeftChild(selectedNode->leftChild());
-                child->ltag=selectedNode->ltag;
-                child->setRightChild(selectedNode->rightChild());
-                child->rtag=selectedNode->rtag;
-            }else if(parent->rightChild()==selectedNode) {
-                parent->setRightChild(child);
-                child->setLeftChild(selectedNode->leftChild());
-                child->ltag=selectedNode->ltag;
-                child->setRightChild(selectedNode->rightChild());
-                child->rtag=selectedNode->rtag;
-            }
-            TreeNodeItem* left=child;
-            if(left->ltag==LINK) {
-                left=left->leftChild();
-                while(left->rtag==LINK) {
-                    left=left->rightChild();
-                }
-                left->setRightChild(child);
-                left->rtag=THREAD;
-            }
-            TreeNodeItem* right=child;
-            if(right->rtag==LINK) {
-                right=right->rightChild();
-                while(right->ltag==LINK) {
-                    right=right->leftChild();
-                }
-                right->setLeftChild(child);
-                right->ltag=THREAD;
-            }
-        }
-        selectedNode=nullptr;
+    if (!selectedNodeId_) {
+        showInputError(tr("请先选择需要删除的节点。"));
+        return;
+    }
+    if (!tree_.erase(*selectedNodeId_)) {
+        showInputError(tr("选中的节点已不存在。"));
+        selectedNodeId_.reset();
         drawTree();
-    } else {
-        QMessageBox::warning(this, "错误", "请先选择一个节点！");
+        return;
     }
-
+    selectedNodeId_.reset();
+    drawTree();
 }
 
-void MainWindow::onNodeClicked(int value) {
-    // 重置所有节点的颜色
-    resetNodeColors(root);
-
-    // 查找并高亮选中的节点
-    selectedNode = findNode(root, value);
-    if (selectedNode) {
-        selectedNode->setBrush(Qt::yellow); // 高亮选中节点
+void MainWindow::onNodeClicked(NodeId id) {
+    if (!tree_.find(id)) return;
+    selectedNodeId_ = id;
+    for (auto it = nodeItems_.begin(); it != nodeItems_.end(); ++it) {
+        it.value()->setHighlighted(it.key() == id);
     }
+    updateSelectionText();
 }
-TreeNodeItem* MainWindow::findParent(TreeNodeItem* node,TreeNodeItem* target){
-    if(root==nullptr||target==nullptr)return nullptr;
-    if((node->ltag==LINK&&node->leftChild()==target)||(node->rtag==LINK&&node->rightChild()==target)){
-        return node;
+
+void MainWindow::updateSelectionText() {
+    if (!selectedNodeId_) {
+        selectionLabel_->setText(tr("当前选择：无"));
+        return;
     }
-    TreeNodeItem* parent=nullptr;
-    if(node->ltag==LINK){
-        parent=findParent(node->leftChild(),target);
+    const auto* node = tree_.find(*selectedNodeId_);
+    if (!node) {
+        selectionLabel_->setText(tr("当前选择：无"));
+        return;
     }
-    if (parent == nullptr && node->rtag == LINK) {
-        parent = findParent(node->rightChild(), target);
-    }
-    return parent;
+    selectionLabel_->setText(tr("当前选择：值 %1（节点ID %2）")
+                                 .arg(node->value)
+                                 .arg(static_cast<qulonglong>(node->id)));
 }
-void MainWindow::resetNodeColors(TreeNodeItem* node) {
-    if (!node) return;
 
-    // 重置当前节点的颜色
-    node->setBrush(Qt::white); // 默认颜色
-
-    // 递归重置左子树和右子树的颜色
-    if(node->ltag==LINK){
-        resetNodeColors(node->leftChild());}
-    if(node->rtag==LINK){
-        resetNodeColors(node->rightChild());}
+void MainWindow::updateTraversalText() {
+    QStringList values;
+    for (const auto* node : tree_.threadedInorderNodes()) values << QString::number(node->value);
+    traversalLabel_->setText(tr("中序线索遍历：%1").arg(values.isEmpty() ? tr("（空）") : values.join(" → ")));
 }
-TreeNodeItem* MainWindow::findNode(TreeNodeItem* node, int value) {
-    if (!node) return nullptr;
-    if (node->getValue() == value) return node;
 
-    TreeNodeItem* result = nullptr;
-    if (node->ltag == LINK) {
-        result = findNode(node->leftChild(), value);
-    }
-    if (!result && node->rtag == LINK) {
-        result = findNode(node->rightChild(), value);
-    }
-    return result;
+void MainWindow::showInputError(const QString& message) {
+    QMessageBox::warning(this, tr("操作失败"), message);
 }

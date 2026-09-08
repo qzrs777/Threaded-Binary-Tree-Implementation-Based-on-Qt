@@ -2,23 +2,29 @@
 #define TREEEDGEITEM_H
 
 #include <QGraphicsPathItem>
-#include <QPainterPath>
-#include <QPen>
+
+class QPainter;
+class QStyleOptionGraphicsItem;
+class QWidget;
+
+enum class TreeEdgeKind {
+    Child,
+    Thread
+};
 
 class TreeEdgeItem : public QGraphicsPathItem {
 public:
-    TreeEdgeItem(QGraphicsItem* parent = nullptr)
-        : QGraphicsPathItem(parent) {
-        // 设置默认样式
-        QPen pen;
-        pen.setColor(Qt::black);
-        pen.setWidth(2);
-        setPen(pen);
-    }
-void setLine(const QLineF& line);
-    void setPath(const QPainterPath& path) {
-        QGraphicsPathItem::setPath(path); // 调用基类的 setPath
-    }
+    TreeEdgeItem(const QPainterPath& path, TreeEdgeKind kind, QGraphicsItem* parent = nullptr);
+
+    TreeEdgeKind kind() const;
+
+protected:
+    void paint(QPainter* painter,
+               const QStyleOptionGraphicsItem* option,
+               QWidget* widget = nullptr) override;
+
+private:
+    TreeEdgeKind kind_;
 };
 
-#endif // TREEEDGEITEM_H
+#endif

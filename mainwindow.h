@@ -1,45 +1,53 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
+#include "threadedbinarytree.h"
+
+#include <QHash>
 #include <QMainWindow>
-#include <QGraphicsScene>
-#include <QGraphicsView>
-#include <QPushButton>
-#include <QLineEdit>
-#include<QRadioButton>
-#include "TreeNodeItem.h"
+#include <optional>
+
+class QLabel;
+class QGraphicsScene;
+class QGraphicsView;
+class QLineEdit;
+class QPushButton;
+class QRadioButton;
+class QString;
+class TreeNodeItem;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
 
 public:
-    MainWindow(QWidget *parent = nullptr);
-    ~MainWindow();
+    explicit MainWindow(QWidget* parent = nullptr);
 
 private slots:
     void onAddButtonClicked();
     void onDeleteButtonClicked();
-    void onNodeClicked(int value);
+    void onNodeClicked(NodeId id);
 
 private:
     void drawTree();
-    void drawNode(TreeNodeItem* node, int x, int y, int offset);
-    void drawEdge(TreeNodeItem* from, TreeNodeItem* to);
-    void resetNodeColors(TreeNodeItem* node);
-    void drawThreadEdge(TreeNodeItem* from, TreeNodeItem* to);
-    TreeNodeItem* findParent(TreeNodeItem* node, TreeNodeItem* target);
-    TreeNodeItem* findNode(TreeNodeItem* node, int value);
+    void assignDepths(const ThreadedNode* node, int depth, QHash<NodeId, int>& depths) const;
+    void drawEdge(NodeId from, NodeId to, bool thread, bool predecessorThread = false);
+    void updateSelectionText();
+    void updateTraversalText();
+    void showInputError(const QString& message);
 
-    QGraphicsScene* scene;
-    QGraphicsView* view;
-    QRadioButton* option1;
-    QRadioButton* option2;
-    QLineEdit* nodeInput;
-    QPushButton* addButton;
-    QPushButton* deleteButton;
+    ThreadedBinaryTree tree_;
+    std::optional<NodeId> selectedNodeId_;
+    QHash<NodeId, TreeNodeItem*> nodeItems_;
 
-    TreeNodeItem* root;
-    TreeNodeItem* selectedNode;
+    QGraphicsScene* scene_;
+    QGraphicsView* view_;
+    QLineEdit* nodeInput_;
+    QRadioButton* leftOption_;
+    QRadioButton* rightOption_;
+    QPushButton* addButton_;
+    QPushButton* deleteButton_;
+    QLabel* selectionLabel_;
+    QLabel* traversalLabel_;
 };
 
-#endif // MAINWINDOW_H
+#endif

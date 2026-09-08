@@ -1,49 +1,39 @@
-#include "TreeNodeItem.h"
+#include "treenodeitem.h"
+
 #include <QBrush>
+#include <QFont>
 #include <QGraphicsSceneMouseEvent>
+#include <QGraphicsTextItem>
+#include <QPen>
 
-TreeNodeItem::TreeNodeItem(int value, QGraphicsItem* parent)
+TreeNodeItem::TreeNodeItem(NodeId id, int value, QGraphicsItem* parent)
     : QObject(nullptr),
-    QGraphicsEllipseItem(-20, -20, 40, 40, parent),
-    value(value),
-    ltag(LINK),
-    rtag(LINK),
-    left(nullptr),
-    right(nullptr) {
-    setBrush(Qt::lightGray);
-    setPen(QPen(Qt::black, 2));
+      QGraphicsEllipseItem(-23, -23, 46, 46, parent),
+      id_(id),
+      textItem_(new QGraphicsTextItem(QString::number(value), this)) {
+    setBrush(QColor("#f8fafc"));
+    setPen(QPen(QColor("#334155"), 2));
+    setZValue(1);
+    setCursor(Qt::PointingHandCursor);
 
-    textItem = new QGraphicsTextItem(QString::number(value), this);
-    textItem->setPos(-10, -15);
-    textItem->setDefaultTextColor(Qt::black);
+    QFont font = textItem_->font();
+    font.setBold(true);
+    textItem_->setFont(font);
+    textItem_->setDefaultTextColor(QColor("#0f172a"));
+    const QRectF bounds = textItem_->boundingRect();
+    textItem_->setPos(-bounds.width() / 2.0, -bounds.height() / 2.0);
 }
 
-int TreeNodeItem::getValue() const {
-    return value;
+NodeId TreeNodeItem::nodeId() const {
+    return id_;
 }
 
-void TreeNodeItem::setValue(int value) {
-    this->value = value;
-    textItem->setPlainText(QString::number(value));
-}
-
-TreeNodeItem* TreeNodeItem::leftChild() const {
-    return left;
-}
-
-TreeNodeItem* TreeNodeItem::rightChild() const {
-    return right;
-}
-
-void TreeNodeItem::setLeftChild(TreeNodeItem* node) {
-    left = node;
-}
-
-void TreeNodeItem::setRightChild(TreeNodeItem* node) {
-    right = node;
+void TreeNodeItem::setHighlighted(bool highlighted) {
+    setBrush(highlighted ? QColor("#fde68a") : QColor("#f8fafc"));
+    setPen(QPen(highlighted ? QColor("#d97706") : QColor("#334155"), highlighted ? 3 : 2));
 }
 
 void TreeNodeItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
-    emit clicked(value);  // 触发信号
+    emit clicked(id_);
     QGraphicsEllipseItem::mousePressEvent(event);
 }
