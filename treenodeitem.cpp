@@ -1,6 +1,7 @@
 #include "treenodeitem.h"
 
 #include <QBrush>
+#include <QCursor>
 #include <QFont>
 #include <QGraphicsSceneMouseEvent>
 #include <QGraphicsTextItem>
@@ -14,7 +15,7 @@ TreeNodeItem::TreeNodeItem(NodeId id, int value, QGraphicsItem* parent)
     setBrush(QColor("#f8fafc"));
     setPen(QPen(QColor("#334155"), 2));
     setZValue(1);
-    setCursor(Qt::PointingHandCursor);
+    setCursor(QCursor(Qt::PointingHandCursor));
 
     QFont font = textItem_->font();
     font.setBold(true);
